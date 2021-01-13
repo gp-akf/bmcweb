@@ -2157,7 +2157,8 @@ class Systems : public Node
         getLocationIndicatorActive(asyncResp);
         // TODO (Gunnar): Remove IndicatorLED after enough time has passed
         getIndicatorLedState(asyncResp);
-        getComputerSystem(asyncResp, health);
+        // mask off until adapted
+        // getComputerSystem(asyncResp, health);
         getHostState(asyncResp);
         getBootProperties(asyncResp);
         getBootProgress(asyncResp);
