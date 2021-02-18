@@ -9,7 +9,7 @@ not-always-obvious ways, or impose a pattern that tends to cause hard to find
 bugs, or bugs that appear later.  Every one has been submitted to code review
 multiple times.
 
-### Directly dereferencing a pointer without checking for validity first
+### 1. Directly dereferencing a pointer without checking for validity first
 ```C++
 int myBadMethod(const nlohmann::json& j){
     const int* myPtr = j.get_if<int>();
@@ -18,7 +18,7 @@ int myBadMethod(const nlohmann::json& j){
 ```
 This pointer is not guaranteed to be filled, and could be a null dereference.
 
-### String views aren't null terminated
+### 2. String views aren't null terminated
 ```C++
 int getIntFromString(const std::string_view s){
     return std::atoi(s.data());
@@ -28,7 +28,7 @@ This will give the right answer much of the time, but has the possibility to
 fail when string\_view is not null terminated.  Use from\_chars instead, which
 takes both a pointer and a length
 
-### Not handling input errors
+### 3. Not handling input errors
 ```C++
 int getIntFromString(const std::string& s){
     return std::atoi(s.c_str());
@@ -39,7 +39,7 @@ undefined behavior at system level.  Code needs to check for validity of the
 string, ideally with something like from\_chars, and return the appropriate error
 code.
 
-### Walking off the end of a string
+### 4. Walking off the end of a string
 ```C++
 std::string getFilenameFromPath(const std::string& path){
     size_t index = path.find("/");
@@ -51,7 +51,7 @@ std::string getFilenameFromPath(const std::string& path){
 }
 ```
 
-### Using methods that throw (or not handling bad inputs)
+### 5. Using methods that throw (or not handling bad inputs)
 ```C++
 int myBadMethod(nlohmann::json& j){
     return j.get<int>();
@@ -98,7 +98,7 @@ asio methods, and prefer the one that returns an error code instead of throwing.
 - boost::asio::ip::tcp::acceptor::listen();
 - boost::asio::ip::address::make\_address();
 
-### Blocking functions
+### 6. Blocking functions
 
 bmcweb uses a single reactor for all operations.  Blocking that reactor for any
 amount of time causes all other operations to stop.  The common blocking
@@ -120,7 +120,7 @@ system, the fact that most filesystem accesses are into tmpfs (and therefore
 should be "fast" most of the time) and in general how little the filesystem is
 used in practice.
 
-### Lack of locking between subsequent calls
+### 7. Lack of locking between subsequent calls
 While global data structures are discouraged, they are sometimes required to
 store temporary state for operations that require it.  Given the single
 threaded nature of bmcweb, they are not required to be explicitly threadsafe,
@@ -140,7 +140,7 @@ void secondCallbackInFlow(){
 In the above case, the first callback needs a check to ensure that
 currentOperation is not already being used.
 
-### Wildcard reference captures in lambdas
+### 8. Wildcard reference captures in lambdas
 ```
 std::string x; auto mylambda = [&](){
     x = "foo";
@@ -156,7 +156,7 @@ captured by value or by reference.  The above prototypes would change to
 [&x]()... Which makes clear that x is captured, and its lifetime needs tracked.
 
 
-### URLs should end in "/"
+### 9. URLs should end in "/"
 ```C++
 BMCWEB("/foo/bar");
 ```
@@ -168,7 +168,7 @@ used by users.  While many specifications do not require this, it resolves a
 whole class of bug that we've seen in the past.
 
 
-### URLs constructed in aggregate
+### 10. URLs constructed in aggregate
 ```C++
 std::string routeStart = "/redfish/v1";
 
@@ -180,3 +180,61 @@ accuracy.  While these processes are largely manual, they can mostly be
 conducted by a simple grep statement to search for urls in question.  Doing the
 above makes the route handlers no longer greppable, and complicates bmcweb
 patchsets as a whole.
+
+### 11. Not responding to 404
+```C++
+BMCWEB_ROUTE("/myendpoint/<str>",
+    [](Request& req, Response& res, const std::string& id){
+     crow::connections::systemBus->async_method_call(
+          [asyncResp](const boost::system::error_code ec,
+                      const std::string& myProperty) {
+              if (ec)
+              {
+                  messages::internalError(asyncResp->res);
+                  return;
+              }
+              ... handle code
+          },
+          "xyz.openbmc_project.Logging",
+          "/xyz/openbmc_project/mypath/" + id,
+          "xyz.MyInterface", "GetAll", "");
+});
+```
+All bmcweb routes should handle 404 (not found) properly, and return it where
+appropriate.  500 internal error is not a substitute for this, and should be
+only used if there isn't a more appropriate error code that can be returned.
+This is important, because a number of vulnerability scanners attempt injection
+attacks in the form of /myendpoint/foobar, or /myendpoint/#$*(%)&#%$)(*&  in an
+attempt to circumvent security.  If the server returns 500 to any of these
+requests, the security scanner logs it as an error for followup.  While in
+general these errors are benign, and not actually a real security threat, having
+a clean security run allows maintainers to minimize the amount of time spent
+triaging issues reported from these scanning tools.
+
+A inplementation of the above that handles 404 would look like:
+```C++
+BMCWEB_ROUTE("/myendpoint/<str>",
+    [](Request& req, Response& res, const std::string& id){
+     crow::connections::systemBus->async_method_call(
+          [asyncResp](const boost::system::error_code ec,
+                      const std::string& myProperty) {
+              if (ec == <error code that gets returned by not found>){
+                  messages::resourceNotFound(res);
+                  return;
+              }
+              if (ec)
+              {
+                  messages::internalError(asyncResp->res);
+                  return;
+              }
+              ... handle code
+          },
+          "xyz.openbmc_project.Logging",
+          "/xyz/openbmc_project/mypath/" + id,
+          "xyz.MyInterface", "GetAll", "");
+});
+```
+
+Note: A more general form of this rule is that no handler should ever return 500
+on a working system, and any cases where 500 is found, can immediately be
+assumed to be [a bug in either the system, or bmcweb.](https://github.com/openbmc/bmcweb/blob/master/DEVELOPING.md#error-handling)

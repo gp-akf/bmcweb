@@ -8,9 +8,7 @@ project('bmcweb', 'cpp',
             'buildtype=debugoptimized',
             'b_ndebug=if-release',
             'b_lto=true',
-# enable when https://github.com/chriskohlhoff/asio/issues/533
-# is resolved. ASIO default executor doesn't build with no-rtti
-           #'cpp_rtti=false'
+            'cpp_rtti=false'
            ])
 
 # Project related links
@@ -34,8 +32,10 @@ optimization = get_option('optimization')
 summary('Build Type',build, section : 'Build Info')
 summary('Optimization',optimization, section : 'Build Info')
 
+
 # remove debug information for minsize buildtype
 if(get_option('buildtype') == 'minsize')
+  add_project_arguments(['-fdata-sections', '-ffunction-sections'], language : 'cpp')
   add_project_arguments('-DNDEBUG', language : 'cpp')
 endif
 
@@ -108,13 +108,6 @@ endforeach
 
 if(get_option('tests').enabled())
   summary('unittest','NA', section : 'Enabled Features')
-endif
-
-if get_option('yocto-deps').disabled()
-  # This is an out of tree build, so enable ibm console flag
-  # for CI purpose.
-  add_project_arguments('-DBMCWEB_ENABLE_IBM_MANAGEMENT_CONSOLE', language: 'cpp')
-  summary('ibm-management-console','-DBMCWEB_ENABLE_IBM_MANAGEMENT_CONSOLE',section : 'Enabled Features')
 endif
 
 # Add compiler arguments
@@ -251,7 +244,8 @@ cxx.get_supported_arguments([
 '-DBOOST_NO_TYPEID',
 '-DBOOST_COROUTINES_NO_DEPRECATION_WARNING',
 '-DBOOST_URL_STANDALONE',
-'-DBOOST_URL_HEADER_ONLY'
+'-DBOOST_URL_HEADER_ONLY',
+'-DBOOST_ALLOW_DEPRECATED_HEADERS'
 ]),
 language : 'cpp')
 
@@ -299,10 +293,10 @@ else
 endif
 bmcweb_dependencies += nlohmann_json
 
-boost = dependency('boost',version : '>=1.73.0', required : false)
+boost = dependency('boost',version : '>=1.75.0', required : false)
 if not boost.found()
   subproject('boost', required: false)
-  boost_inc = include_directories('subprojects/boost_1_73_0/', is_system:true)
+  boost_inc = include_directories('subprojects/boost_1_75_0/', is_system:true)
   boost  = declare_dependency(include_directories : boost_inc)
 endif
 bmcweb_dependencies += boost
@@ -334,6 +328,7 @@ srcfiles_bmcweb = ['src/webserver_main.cpp','redfish-core/src/error_messages.cpp
 srcfiles_unittest = ['include/ut/dbus_utility_test.cpp',
                      'redfish-core/ut/privileges_test.cpp',
                      'redfish-core/ut/lock_test.cpp',
+                     'redfish-core/ut/configfile_test.cpp',
                      'http/ut/utility_test.cpp']
 
 # Gather the Configuration data
@@ -382,6 +377,7 @@ install_subdir('static', install_dir : 'share/www', strip_directory : true)
 executable('bmcweb',srcfiles_bmcweb,
             include_directories : incdir,
             dependencies: bmcweb_dependencies,
+            link_args: '-Wl,--gc-sections',
             install: true,
             install_dir:bindir)
 
@@ -392,7 +388,7 @@ if(get_option('tests').enabled())
                 include_directories : incdir,
                 install_dir: bindir,
                 dependencies: [
-                                boost, boost_url, gtest,openssl,gmock,nlohmann_json,sdbusplus
+                                boost, boost_url, gtest,openssl,gmock,nlohmann_json,sdbusplus,pam
                               ]))
   endforeach
 endif
